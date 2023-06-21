@@ -9,33 +9,109 @@ import java.io.Serializable;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import static java.lang.Integer.parseInt;
 
 public class TransactionSimulator {
-    private static final String API_ENDPOINT = "http://172.28.48.201:8092/cfrt-adapter-ws/getFraudScore";
-    private static final int THREAD_POOL_SIZE = 5;  //Number of concurrent users
+    private static String API_ENDPOINT = "http://172.28.48.201:8092/cfrt-adapter-ws/getFraudScore";
+    private static int THREAD_POOL_SIZE = 5;  //Number of concurrent users
+
+    private static final  OkHttpClient client = new OkHttpClient();
+
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
+
+
+
+    private static String FILE_PATH="transactions.csv";
 
     public static void main(String[] args) {
         // Read CSV file
-        List<String[]> csvRecords = readCSVFile("transactions.csv");
+//        if (args[0]!=null || args[0]!=""){
+//            API_ENDPOINT=args[0].trim();
+//        }
+//        if (args[1] != null || args[1]!="") {
+//            THREAD_POOL_SIZE=parseInt(args[1].trim());
+//
+//
+//        }
+        API_ENDPOINT = (args.length > 0 && args[0] != null && !args[0].isEmpty()) ? args[0].trim() : API_ENDPOINT;
+        THREAD_POOL_SIZE = (args.length > 1 && args[1] != null && !args[1].isEmpty()) ? Integer.parseInt(args[1].trim()) : THREAD_POOL_SIZE;
+        FILE_PATH = (args.length > 2 && args[2] != null && !args[2].isEmpty()) ? args[2].trim() : FILE_PATH;
+
+
+
+
+        List<String[]> csvRecords = readCSVFile(FILE_PATH);
+        int len;
+        try {
+            len=csvRecords.size();
+        }    catch (NullPointerException e){
+            len=0;
+        }
+        System.out.println("Number of records: " + len);
 
          //Create a thread pool with a fixed number of threads
         ExecutorService executorService = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
 
+        long startTime=System.currentTimeMillis();
+        //System.out.printf(System.cu);
         // Submit tasks to the thread pool
-        for (String[] record : csvRecords) {
-            Transaction transaction = createTransaction(record);
-            Runnable task = createTask(transaction);
-            executorService.submit(task);
+
+//        for (String[] record : csvRecords) {
+//            Transaction transaction = createTransaction(record);
+//            Runnable task = createTask(transaction);
+//            executorService.submit(task);
+//        }
+
+
+        try(CSVReader csvReader= new CSVReader(new FileReader(FILE_PATH))){
+            String [] nextLine;
+            while((nextLine=csvReader.readNext())!=null){
+                Transaction transaction=createTransaction(nextLine);
+                Runnable task=createTask(transaction);
+                executorService.submit(task);
+            }
+        }catch (IOException | CsvException e){
+            System.out.println("ERR");
         }
 
         // Shutdown the thread pool after all tasks are completed
+
         executorService.shutdown();
-    }
+
+        try {
+            executorService.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+
+            System.out.println("Length of the file = "+len);
+            long processedTime = System.currentTimeMillis();
+            long proccesTime = processedTime - startTime;
+            double tps = (double) len / (proccesTime / 1000.0);
+            System.out.println("TPS: " + tps);
+        }catch (InterruptedException e){
+            System.out.println(e.getMessage());
+        }
+}
 
     private static List<String[]> readCSVFile(String csvFilePath) {
         try (CSVReader csvReader = new CSVReader(new FileReader(csvFilePath))) {
+//            csvReader.re
             return csvReader.readAll();
         } catch (IOException | CsvException e) {
+            e.printStackTrace();
+            return null;
+        }
+    }
+
+
+//    private static void readFileAndSendRequest(String csvFilePath){
+//
+//    }
+    private static String[] readLinesCSVFile(String csvFilePath){
+        try(CSVReader csvReader=new CSVReader(new FileReader(csvFilePath))){
+            return csvReader.readNext();
+        }catch(IOException  | CsvException e){
             e.printStackTrace();
             return null;
         }
@@ -73,13 +149,12 @@ public class TransactionSimulator {
     }
 
     private static void sendPostRequest(Transaction transaction) {
-        OkHttpClient client = new OkHttpClient();
 
-        ObjectMapper objectMapper = new ObjectMapper();
+
         String jsonPayload;
         try {
             jsonPayload = objectMapper.writeValueAsString(transaction);
-            System.out.printf(jsonPayload);
+            //System.out.printf(jsonPayload);
         } catch (Exception e) {
             e.printStackTrace();
             return;
@@ -95,6 +170,7 @@ public class TransactionSimulator {
 
         try (Response response = client.newCall(request).execute()) {
             System.out.println("Request sent successfully: " + response.code());
+            System.out.println("Resp::"+response.body().string());
         } catch (IOException e) {
             e.printStackTrace();
         }
